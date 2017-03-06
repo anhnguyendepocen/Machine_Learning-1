@@ -1,0 +1,143 @@
+---
+title: "HW2"
+author: "Sheng Zhang"
+date: "February 23, 2017"
+output: pdf_document
+---
+
+```{r Q1, echo=TRUE}
+
+# Read in data
+bank_full <- read.csv("./bank-additional-full.csv",header = TRUE,sep=";",stringsAsFactors = TRUE)
+head(bank_full)
+
+# Delete columns that will not used
+bank_full$duration <- NULL
+bank_full$day_of_week <- NULL
+bank_full$month <- NULL
+bank_full$nr.employed <- NULL
+summary(bank_full)
+
+```
+1) 
+
+Removing duration makes sense because duration can be used to predict y "deterministically". specifically, when duration is 0, y is no. Thus, duration should not be included in a realistic predictive model for y.
+
+Removing day of the week and month of the year might make sense if seasonality and weekday vs weekend distinction do not matter for prediction term deposit prediction.
+
+Removing nr.employed might make sense because the number of employees in the economy may just be an indicator of economic performance, which is probably already captured by the other social and economic context variables.
+
+There are some unknowns in the data which we might have to remove. In addition, there are multiple unordered categorical predictors which might not be ideal for tree methods, so we may consider transform those variables as well if we were to use tree methods for predicting y.
+
+
+```{r Q2, echo=TRUE}
+
+# Remove unknowns
+bank_full[bank_full=="unknown"] <- NA
+bank_full <- na.omit(bank_full)
+
+# Substitute values for certain columns
+summary(bank_full$job)
+# bank_full$job[bank_full$job!="unemployed" & bank_full$job!="retired"] <- "employed"
+# bank_full$job[bank_full$job=="unemployed" | bank_full$job=="retired"] <- "unemployed"
+bank_full$job <- as.factor(ifelse(bank_full$job=="unemployed" | bank_full$job=="retired" | bank_full$job == "student","unemployed","employed"))
+summary(bank_full$job)
+
+summary(bank_full$marital)
+bank_full$marital <- as.factor(ifelse(bank_full$marital=="married","married","single"))
+summary(bank_full$marital)
+
+summary(bank_full$education)
+bank_full$education <- as.character(bank_full$education)
+bank_full$education[bank_full$education=="illiterate"] <- "0"
+bank_full$education[bank_full$education=="basic.4y"] <- "1"
+bank_full$education[bank_full$education=="basic.6y"] <- "2"
+bank_full$education[bank_full$education=="basic.9y"] <- "3"
+bank_full$education[bank_full$education=="high.school"] <- "4"
+bank_full$education[bank_full$education=="professional.course"] <- "5"
+bank_full$education[bank_full$education=="university.degree"] <- "6"
+bank_full$education <- as.factor(bank_full$education)
+bank_full$education <- as.numeric(bank_full$education)
+summary(bank_full$education)
+
+```
+
+```{r Q3, echo=TRUE}
+
+# Split into train and test
+set.seed(1)
+bank.train <- sample(1:nrow(bank_full), 0.5*nrow(bank_full))
+bank.test <- bank_full[-bank.train, ]
+
+```
+
+```{r Q4}
+
+# Simple classification tree
+library(tree)
+
+# Gini
+tree.bank.gini <- tree(y ~., data = bank_full, subset = bank.train, control = tree.control(nrow(bank_full)/2, mincut = 400), split = "gini")
+tree.pred.gini <- predict(tree.bank.gini, bank.test, type="class")
+gini.table <- table(tree.pred.gini, bank.test$y)
+gini.accuracy <- (gini.table[1,1]+gini.table[2,2])/sum(gini.table)
+plot(tree.bank.gini)
+text(tree.bank.gini, pretty = 0, cex = .5)
+
+# Deviance
+tree.bank.deviance <- tree(y ~., data = bank_full, subset = bank.train, split = "deviance")
+tree.pred.deviance <- predict(tree.bank.deviance, bank.test, type="class")
+deviance.table <- table(tree.pred.deviance, bank.test$y)
+deviance.accuracy <- (deviance.table[1,1]+deviance.table[2,2])/sum(deviance.table)
+plot(tree.bank.deviance)
+text(tree.bank.deviance, pretty = 0, cex = .5)
+
+```
+4)
+
+The tree I got using Gini has so many more terminal nodes than the tree I got using deviance.
+
+
+```{r Q5}
+
+library(randomForest)
+library(MASS)
+set.seed(2)
+rf.bank <- randomForest(y~., data = bank_full, subset = bank.train, mtry = 4, importance = TRUE)
+importance(rf.bank)
+rf.pred <- predict(rf.bank, bank.test, type="class")
+rf.table <- table(rf.pred, bank.test$y)
+rf.accuracy <- (rf.table[1,1]+rf.table[2,2])/sum(rf.table)
+
+```
+
+```{r Q6}
+
+# install.packages("adabag")
+# install.packages("colorspace")
+library(adabag)
+
+boost.bank <- boosting(y ~., bank_full[bank.train,])
+boost.bank$importance
+boost.pred <- predict(boost.bank, bank.test)
+boost.accuracy <- (boost.pred$confusion[1,1]+boost.pred$confusion[2,2])/sum(boost.pred$confusion)
+
+```
+
+```{r Q7}
+
+# Check accuracy
+gini.accuracy
+deviance.accuracy
+rf.accuracy
+boost.accuracy
+
+```
+7) 
+
+It seems that the prediction accuracy is ranked as follows:
+Boosting > Deviance > Random Forest > Gini
+
+The importance graphs of random forest and boosting both suggest that the most important independent variable is the euro libor rate, which is an indication of the interest rate in the economy. This indicates that interest rate is probably the most important determinant of term deposit subscription decisions.
+
+However, since the y in our dataset contains predominantly "no"s, the prediction accuracy for "yes" is actually really poor. Moreover, we might consider accounting for heterogeneity in our dataset in future models.

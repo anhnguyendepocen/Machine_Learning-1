@@ -1,0 +1,151 @@
+---
+title: "HW1"
+author: "Sheng Zhang"
+date: "February 9, 2017"
+output: pdf_document
+---
+
+```{r Q1, echo=TRUE}
+# Read in data
+crsp <- read.csv("./hw1_crsp.csv",header = TRUE)
+crsp$Alcoa <- as.numeric(as.character(crsp$Alcoa))
+crsp$Kodak <- NULL
+crsp$GM <- NULL
+crsp[is.na(crsp)] <- 0
+
+# Descriptives
+summary(crsp)
+```
+
+```{r Q2, echo=TRUE}
+# 2a)
+# Split
+train_1 <- crsp[crsp$Date < 20060101,]
+train_2 <- crsp[crsp$Date > 20051231 & crsp$Date < 20110101,]
+test <- crsp[crsp$Date > 20101231,]
+
+# PCA
+row.names(crsp) <- crsp$Date
+crsp <- crsp[,2:29]
+train_1 <- train_1[,2:29]
+train_2 <- train_2[,2:29]
+test <- test[,2:29]
+pr.out = prcomp(train_1, scale =TRUE)
+pr.out$rotation
+
+# 2b) & 2c)
+prin_comp_train2 <- as.matrix(train_2) %*% pr.out$rotation
+
+# stack vertically data of all the other firms 
+pca_pred_all <- matrix(,nrow=1228,ncol=869)
+dummy_total <- matrix(,nrow=1228,ncol=28)
+pca_list <- list()
+for (i in 1:28)
+{
+  pca_list[[i]] <- as.matrix(train_2[32:1259,i])
+  for (j in 1:31)
+  {
+    temp <- prin_comp_train2[j:(j+1227),]
+    colnames(temp) <- paste(colnames(temp),j,sep=" ")
+    pca_list[[i]] <- cbind(pca_list[[i]],temp)
+  }
+  dummy <- matrix(rep(0,34384),nrow=1228,ncol=28)
+  dummy[,i] <- rep(1,1228)
+  pca_pred_all <- rbind(pca_pred_all,pca_list[[i]])
+  dummy_total <- rbind(dummy_total,dummy)
+}
+pca_pred_all <- pca_pred_all[1229:35612,]
+dummy_total <- dummy_total[1229:35612,]
+pca_pred_all <- cbind(pca_pred_all,dummy_total)
+
+dim(pca_pred_all)
+head(pca_pred_all,3)
+tail(pca_pred_all,3)
+summary(pca_pred_all[,1:60])
+```
+
+```{r Q3, echo=TRUE}
+# 3a)
+# Lasso
+# install.packages("glmnet")
+library(glmnet)
+x <- pca_pred_all[,2:897]
+y <- pca_pred_all[,1]
+grd <- 10 ^ seq(10,-2,length=100)
+lasso.mod <- glmnet(x,y,alpha=1,lambda=grd)
+
+# 3b)
+set.seed(1)
+cv.out <- cv.glmnet(x,y,alpha=1,nfolds=5)
+plot(cv.out)
+bestlam <- cv.out$lambda.min
+
+out <- glmnet(x,y,nlambda=1,lambda=bestlam,alpha=1)
+coef(out)
+
+```
+
+3c)
+Cross validation can be useful because it uses a test set (that is different from the training set) to assess the model from a training set. This will not be that helpful when the training set and the test set are highly correlated, because, in that case, the test set will be similar to the training set. The correlation within the dataset might be too high for time series data, so cross validation may not be that helpful in this case.
+
+
+```{r Q4}
+prin_comp_test <- as.matrix(test) %*% pr.out$rotation
+
+# Fit 30 Lassos on training set 2 and predict on the test set 
+pca_list_2 <- list()
+lasso.pred <- list()
+lasso_prediction <- as.vector(0)
+for (i in 1:28)
+{
+  pca_list_2[[i]] <- as.matrix(test[32:1510,i])
+  for (j in 1:31)
+  {
+    temp <- prin_comp_test[j:(j+1478),]
+    colnames(temp) <- paste(colnames(temp),j,sep=" ")
+    pca_list_2[[i]] <- cbind(pca_list_2[[i]],temp)
+  }
+}
+
+for (i in 1:28)
+{
+  lasso_by_company <- glmnet(pca_list[[i]][,2:869],pca_list[[i]][,1],nlambda=1,lambda=bestlam,alpha=1)
+  lasso.pred[[i]] <- predict(lasso_by_company,s=bestlam,newx=pca_list_2[[i]][,2:869])
+  lasso_prediction <- rbind(lasso_prediction,lasso.pred[[i]])
+}
+lasso_prediction <- lasso_prediction[2:41413]
+
+# Portfolio performance
+portfolio <- matrix(0,nrow=1479,ncol=10)
+y_test_pred <- rep(0,28)
+y_test_real <- rep(0,28)
+for (i in 1:nrow(portfolio))
+{
+  for (company in 1:28)
+  {
+    y_test_pred[company] <- lasso_prediction[i+1479*(company-1)]
+    y_test_real[company] <- pca_list_2[[company]][i,1]
+  }
+  order_at_t <- order(abs(y_test_pred),decreasing = TRUE)
+  real_return_ranked_by_absprediction <- y_test_real[order_at_t]*sign(y_test_pred[order_at_t])
+  portfolio[i,] <- real_return_ranked_by_absprediction[1:10]
+}
+
+capital <- 100
+for (t in 1:nrow(portfolio))
+{
+  capital <- capital + sum(portfolio[t,])*capital/10
+  }
+capital
+
+# Compare with the market performance
+market <- 100
+for (t in 32:1510)
+{
+  market <- market * (1+rowMeans(test)[t])
+  }
+market
+
+```
+
+4) The strategy seems to have achieved a return of 87.67% over the whole period covered by the test set, which is about four years. The market achieved a return of 195.99% over the same time period. This means that the strategy did not perform very well and incurred a loss for the investor.
