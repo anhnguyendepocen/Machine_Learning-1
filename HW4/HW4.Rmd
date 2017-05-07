@@ -10,8 +10,8 @@ output: pdf_document
 ## Q1
 
 # Read in data
-# advertising <- read.csv("./Advertising.csv", header = TRUE)
-advertising <- read.csv("./Spring 2017/Machine Learning/Rmd files/HW4/Advertising.csv", header = TRUE)
+advertising <- read.csv("./Advertising.csv", header = TRUE)
+# advertising <- read.csv("./Spring 2017/Machine Learning/Rmd files/HW4/Advertising.csv", header = TRUE)
 advertising <- scale(advertising[,-1]) # standardize all inputs to have zero mean and unit variance
 
 
@@ -36,6 +36,7 @@ nn1.pred <- predict(advertising.nn1,x.test)
 mse <- sum((nn1.pred-y.test)^2)/length(y.test)
 mse
 
+# Plot the results
 plot(y.test)
 points(nn1.pred, col = "red", pch = 3)
 
@@ -45,12 +46,7 @@ points(nn1.pred, col = "red", pch = 3)
 
 a) The results are shown from the R output above.
 
-b) I chose 2 as the number of hidden units because there are 3 input units and 1 output unit, so 2, which is between 3 and 1, is an appropriate choice for the number of hidden units. Alternatively, I could choose 3 as the number of hidden units and look at the model results with regularization. For the learning parameter, CV????????????????????????????
-
-
-Unlike most maximum likelihood problems the error function R (θ) is usually non-convex and has many local minima. This means that the chosen minimum and corresponding calibrated weights will depend on the chosen random starting points.
-One approach is to try multiple starting points and take the model with the lowest penalized error.
-A better approach is to use the average prediction over the collection of nets calibrated with diﬀerent starting points.
+b) I chose 2 as the number of hidden units because there are 3 input units and 1 output unit, so 2, which is between 3 and 1, is an appropriate choice for the number of hidden units. Alternatively, I could choose 3 as the number of hidden units and look at the model results with regularization. For the learning parameter, I selected 0.01 after comparing model performance with difference learning rates, but could use cross validation to select the best learning parameter as well. 
 
 
 ```{r Q2}
@@ -85,6 +81,8 @@ mse_ensemble
 2)
 
 I selected 30 neural networks by varying both hidden layer configuration (number of hidden of layers and number of hidden units in each layer) and starting values. The MSE of the ensemble method turns out to be about 0.0062, which is much smaller than the MSE obtained from Q1, suggesting the ensemble method improves the predictve accuracy by a lot.
+
+The reason for the improvement is perhaps because calibrated weights will depend on the chosen random starting points and averaging predictions with different starting points reduce the variance by a lot.
 
 
 ```{r Q3}
@@ -133,12 +131,7 @@ a) The results are shown from the R output above.
 
 b) The results are shown from the R output above.
 
-c) Elman neural network is an appropriate model for time-series prediction, as the context layer within the Elman neural network "remember" the previous internal state of the network by storing hidden layer neuron values. Overfitting?????????????????
-
-???
-
-It is advisable to err on the side of having too many hidden units. With too few units the model might not be ﬂexible enough to describe the data. With too many hidden units we are in danger of overﬁtting; however as we saw this can be dealt with via regularization.
-
+c) Elman neural network is an appropriate model for time-series prediction, as the context layer within the Elman neural network "remember" the previous internal state of the network by storing hidden layer neuron values. The number of hidden units chosen for the model is 5, much fewer than the number of input units, which is 30, suggesting that overfitting may not occur. We could also use regularization to minimize the risk of overfitting.
 
 
 ```{r Q4}
@@ -154,17 +147,13 @@ sp_500.x_train <- head(scale(as.matrix(Weekly[,2:6])),889)
 sp_500.y_train <- head(scale(as.matrix(Weekly[,8])),889)
 
 # Build the Deep Belief Net (DBN)
-library(RcppDL)
-hidden <- c(3,2)
-sp_500.dbn <- Rdbn(sp_500.x_train, sp_500.y_train, hidden)ss
-summary(sp_500.dbn)
-pretrain(sp_500.dbn)
-finetune(sp_500.dbn)
+library(deepnet)
+sp_500.dbn <- dbn.dnn.train(sp_500.x_train, sp_500.y_train, hidden = c(4,3), output = "linear", learningrate = 0.01, numepochs = 1000, cd = 10, momentum = 0.6, hidden_dropout = 0.4, visible_dropout = 0.2, batchsize = 10)
 
 # Make predictions and calculate MSE
 sp_500.x_test <- tail(scale(as.matrix(Weekly[,2:6])),200)
 sp_500.y_test <- tail(scale(as.matrix(Weekly[,8])),200)
-dbn.pred <- predict(sp_500.dbn, sp_500.x_test)
+dbn.pred <- nn.predict(sp_500.dbn, sp_500.x_test)
 mse_dbn <- sum((dbn.pred-sp_500.y_test)^2)/length(sp_500.y_test)
 mse_dbn
 
@@ -176,49 +165,6 @@ a) The results are shown from the R output above.
 
 b) The results are shown from the R output above.
 
-c) 
+c) I used c(4,3) as the number of hidden units because the number of inputs is 5, so I want to make the number of hidden units smaller or equal to 5 to extract meaningful features from the input. I also tried many other hidden layer configurations that satisfy this rule. 
+Overall, My finding is that after trying 100+ set of parameters for the Deep Belief Network, the DBN still produces predictions that do not make much sense. Specifically, the distribution of the predictions do not align very closely with the distribution of the y_test variable. This might be because the package has some problem handling this dataset.
 
-???
-
-
-
-
-
-
-
-```{r backup}
-
-## Q4
-# Build transformed dataset with 5 lagged returns
-data("sp500ret")
-library(quantmod)
-
-
-x_original <- as.ts(scale(dji30ret[,-ncol(dji30ret)]))
-x_lag1 <- lag(x_original, k=1)
-x_lag2 <- lag(x_original, k=2)
-x_lag3 <- lag(x_original, k=3)
-x_lag4 <- lag(x_original, k=4)
-x_lag5 <- lag(x_original, k=5)
-x_combined <- cbind(x_lag1, x_lag2, x_lag3, x_lag4, x_lag5)
-head(x_combined)
-x_combined <- na.omit(x_combined)[-1,]
-head(x_combined)
-y_original <- scale(dji30ret[1:nrow(x_combined),ncol(dji30ret)])
-dji_lag5 <- cbind(x_combined, y_original)
-
-# Split into training and test sets
-dji_lag5.train <- head(dji_lag5,989)
-dji_lag5.test <- tail(dji_lag5,200)
-x_lag5.train <- as.matrix(dji_lag5.train[,-ncol(dji_lag5.train)])
-y_lag5.train <- as.matrix(dji_lag5.train[,ncol(dji_lag5.train)])
-
-# Build the Deep Belief Net (DBN)
-library(RcppDL)
-hidden <- c(20,5)
-dji.dbn <- Rdbn(x_lag5.train, y_lag5.train, hidden)
-summary(dji.dbn)
-pretrain(dji.dbn)
-finetune(dji.dbn)
-
-```

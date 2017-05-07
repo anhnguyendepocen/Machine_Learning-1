@@ -20,6 +20,13 @@ qplot(as.factor(credit$AGE), xlab="Age", ylab="")
 qplot(log(credit$BILL_AMT1), geom="histogram")
 
 
+# Balance Samples
+# balanced sample yields worse results
+# credit_0 <- subset(credit, default == 0)
+# credit_1 <- subset(credit, default == 1)
+# credit_temp <- credit_0[sample(1:nrow(credit_0), nrow(credit_1)),]
+# credit <- rbind(credit_temp, credit_1)
+
 # Split into train and test
 set.seed(1)
 credit.train.id <- sample(1:nrow(credit), 0.8*nrow(credit))
@@ -31,16 +38,13 @@ rownames(credit.test) <- seq(1,dim(credit.test)[1])
 
 # Predict default for next month
 
+# Prepare data
 xfactors_train <- credit.train[,2:24]
 xfactors_train <- as.matrix(sapply(xfactors_train, as.numeric))
 xfactors_test <- credit.test[,2:24]
 xfactors_test <- as.matrix(sapply(xfactors_test, as.numeric))
-# OR
-xfactors_train <- data.matrix(credit.train[,2:24], rownames.force=NA)
-xfactors_test <- data.matrix(credit.test[,2:24], rownames.force=NA)
-xfactors_train <- sapply(xfactors_train, as.numeric)
-xfactors_test <- sapply(xfactors_test, as.numeric)
-
+yfactors_train <- as.matrix(as.numeric(credit.train$default)-1)
+yfactors_test <- as.matrix(as.numeric(credit.test$default)-1)
 
 
 # Lasso (1st Specification)
@@ -73,7 +77,6 @@ lasso.table2 <- table(lasso.pred2, credit.test$default)
 lasso.accuracy2 <- (lasso.table2[1,1]+lasso.table2[2,2])/sum(lasso.table2)
 
 
-
 # Random Forest (1st Specification)
 library(randomForest)
 library(MASS)
@@ -92,94 +95,25 @@ rf.table2 <- table(rf.pred2, credit.test$default)
 rf.accuracy2 <- (rf.table2[1,1]+rf.table2[2,2])/sum(rf.table2)
 
 
-
 # Neural Network
 library(RSNNS)
-credit.net1 <- RSNNS::mlp(x=xfactors_train,y=as.numeric(credit.train$default),size = c(10), maxit = 10000, learnFuncParams = 0.0001, linOut = FALSE)
-
-# OR
-library(RcppDL)
-yfactors_train <- cbind(as.numeric(credit.train$default)-1, as.numeric(ifelse(credit.train$default==1,0,1)))
-yfactors_train <- as.matrix(yfactors_train)
-hidden <- c(10,3)  # How to select the best size?
-credit.deep_auto <- RcppDL::Rsda(xfactors_train, yfactors_train, hidden)
-RcppDL::setCorruptionLevel(credit.deep_auto, x = 0.3)
-RcppDL::setFinetuneLearningRate(credit.deep_auto, x = 0.1)
-summary(credit.deep_auto)
-pretrain(credit.deep_auto)
-finetune(credit.deep_auto)
-deep_auto.pred <- predict(credit.deep_auto, xfactors_test)
-deep_auto.pred <- ifelse( deep_auto.pred[, 1] >= mean(yfactors_train[,1]), 1, 0)
-deep_auto.table <- table(deep_auto.pred, yfactors_test[,1])
-deep_auto.accuracy <- (deep_auto.table[1,1]+deep_auto.table[2,2])/sum(deep_auto.table)
-
-
-
-# Stacked Autoencoder
-library(autoencoder)
-library(SAENET)
-credit.ae <- SAENET.train(as.matrix(credit.train[,2:24]), n.nodes = c(5,3), lambda = 1e-5, beta = 1e-5, rho = 0.01, epsilon = 0.01)
-ae.pred <- SAENET.predict(credit.ae, as.matrix(credit.test[,2:24]),layers=c(1),all.layers=FALSE)
-# How to use SAE for supervised learning?
-
-
+x_scale_train <- scale(xfactors_train)
+x_scale_test <- scale(xfactors_test)
+credit.nn1 <- mlp(x_scale_train, yfactors_train, size = c(4), maxit = 10000, learnFuncParams = 0.9, linOut = FALSE)
+nn.pred <- predict(credit.nn1, xfactors_test)
+nn.pred <- ifelse( nn.pred >= mean(yfactors_train), 1, 0)
+nn.table <- table(nn.pred, yfactors_test)
+nn.accuracy <- (nn.table[1,1]+nn.table[2,2])/sum(nn.table)
 
 # Ensemble
+size_list <- list(c(5),c(6),c(7),c(8),c(5,2),c(5,3),c(5,4),c(5,5),c(6,2),c(6,3),c(6,4),c(6,5),c(6,6),c(7,2),c(7,3),c(7,4),c(7,5),c(7,6),c(7,7),c(8,2),c(8,3),c(8,4),c(8,5),c(8,6),c(8,7),c(8,8))
+for (i in 1:15)
+{
+  credit.nn_temp <- mlp(x_scale_train, yfactors_train, size = size_list[[i]], maxit = 10000, learnFuncParams = 0.01, linOut = FALSE)
+  nn.pred <- cbind(nn.pred, predict(credit.nn_temp, x_scale_test))
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Backup
-
-
-
-
-
-
-# Simple classification tree
-library(tree)
-
-# Gini
-tree.credit.gini <- tree(default ~., data = credit, subset = credit.train.id, control = tree.control(nrow(credit.train)/2, mincut = 5), split = "gini")
-tree.pred.gini <- predict(tree.credit.gini, credit.test, type="class")
-gini.table <- table(tree.pred.gini, credit.test$y)
-gini.accuracy <- (gini.table[1,1]+gini.table[2,2])/sum(gini.table)
-plot(tree.credit.gini)
-text(tree.credit.gini, pretty = 0, cex = .5)
-
-# Deviance
-tree.credit.deviance <- tree(default ~., data = credit, subset = credit.train.id, control = tree.control(nrow(credit.train)/2, mincut = 5), split = "deviance")
-tree.pred.deviance <- predict(tree.credit.deviance, credit.test, type="class")
-deviance.table <- table(tree.pred.deviance, credit.test$y)
-deviance.accuracy <- (deviance.table[1,1]+deviance.table[2,2])/sum(deviance.table)
-plot(tree.credit.deviance)
-text(tree.credit.deviance, pretty = 0, cex = .5)
-
-
-# Boosted Trees
-library(adabag)
-boost.credit <- boosting(default ~ AGE + MARRIAGE, data = credit.train, boos = TRUE, control = rpart.control(minsplit = 0))
-boost.credit$importance
-boost.pred <- predict(boost.credit, credit.test)
-boost.accuracy <- (boost.pred$confusion[1,1]+boost.pred$confusion[2,2])/sum(boost.pred$confusion)
+nn_ensemble.pred <- rowMeans(nn.pred)
+nn_ensemble.pred <- ifelse( nn_ensemble.pred >= mean(yfactors_train), 1, 0)
+nn_ensemble.table <- table(nn_ensemble.pred, yfactors_test)
+nn_ensemble.accuracy <- (nn_ensemble.table[1,1]+nn_ensemble.table[2,2])/sum(nn_ensemble.table)
